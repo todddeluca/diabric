@@ -119,7 +119,7 @@ class AttrDict(dict):
 
 # dir/
 #   bin/ # executables
-#   app/ # webapp
+#   app/ # app
 #   log/ # log files
 #   conf/ # configuration
 #   venv/ # virtual environment
@@ -135,7 +135,7 @@ def bin_dir(dir):
 
 
 def app_dir(dir):
-    return os.path.join(dir, 'webapp')
+    return os.path.join(dir, 'app')
 
 
 def log_dir(dir):
