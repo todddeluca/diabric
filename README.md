@@ -1,7 +1,7 @@
 
 # Introduction
 
-Fabutil is a python package containing utilities (fabric tasks, functions, etc.) for using fabric to:
+Diabric is a python package containing utilities (fabric tasks, functions, etc.) for using fabric to:
 
 - work with Amazon EC2
 - configure machines
@@ -29,10 +29,10 @@ Install distutils2 if you do not yet have it installed.
 
     pip install distutils2
 
-Download and install fabutil.
+Download and install diabric.
 
     cd ~
-    git clone git@github.com:todddeluca/fabutil.git
-    cd fabutil
-    pysetup run install_dist
+    git clone git@github.com:todddeluca/diabric.git
+    cd diabric
+    pysetup install
 
