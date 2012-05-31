@@ -4,16 +4,131 @@ Fabric utilities for working with files.
 '''
 
 import StringIO
+import contextlib
 import os
+import shutil
 import subprocess
+import uuid
 
-from fabric.api import sudo, run, settings, hide, put
+from fabric.api import sudo, run, settings, hide, put, local
 from fabric.contrib.files import exists
 
+
+##################
+# HELPER FUNCTIONS
+# These functions are reusable snippets meant to improve the consistency 
+# and modularity of files.py code
+
+def set_mode(path, mode, remote=True, use_sudo=False):
+    '''
+    To improve code consistency and composition, this function
+    changes the mode of `path` to `mode`.
+
+    path: the path to the file or directory whose mode is being set.
+    remote: indicates that filename is a located on a remote host and `run`
+    or `sudo` should be used to set the mode.
+    use_sudo: only applies when remote is True.  Use `sudo` instead of `run`.
+    '''
+    func = local if not remote else sudo if use_sudo else run
+    func('chmod {} {}'.format(oct(mode), path))
+
+
+def backup_file(filename, remote=True, use_sudo=False, extension='.bak'):
+    '''
+    filename: path to a local or remote file
+
+    If filename exists, copy filename to filename.bak
+    '''
+    func = local if not remote else sudo if use_sudo else run
+    if exists(filename):
+        func("cp %s %s.bak" % (filename, filename))
+
+
+def normalize_dest(src, dest, remote=True, use_sudo=False):
+    '''
+    src: a file path
+    dest: a file or directory path
+
+    If dest is an existing directory, this returns a path to the basename of src within the directory dest.
+    Otherwise, if dest is returned unchanged.
+    This is useful for getting an actual filename when destination can be
+    a file or a directory.
+    '''
+    func = local if not remote else sudo if use_sudo else run
+    # Normalize dest to be an actual filename, due to using StringIO
+    with settings(hide('everything'), warn_only=True):
+        if func('test -d %s' % dest).succeeded:
+            dest = os.path.join(dest, os.path.basename(src))
+
+    return dest
 
 
 ################
 # FILE FUNCTIONS
+
+
+def file_template(filename, destination, context=None, use_jinja=False,
+    template_dir=None, backup=True, mirror_local_mode=False, mode=None):
+    """
+    This is the local version of upload_template.
+
+    Render and copy a template text file to a local destination.
+
+    ``filename`` should be the path to a text file, which may contain `Python
+    string interpolation formatting
+    <http://docs.python.org/release/2.5.4/lib/typesseq-strings.html>`_ and will
+    be rendered with the given context dictionary ``context`` (if given.)
+
+    Alternately, if ``use_jinja`` is set to True and you have the Jinja2
+    templating library available, Jinja will be used to render the template
+    instead. Templates will be loaded from the invoking user's current working
+    directory by default, or from ``template_dir`` if given.
+
+    The resulting rendered file will be written to the local file path
+    ``destination``.  If the destination file already exists, it will be
+    renamed with a ``.bak`` extension unless ``backup=False`` is specified.
+
+    The ``mirror_local_mode`` and ``mode`` kwargs are used in a similar
+    manner as in `~fabric.operations.put`; please see its documentation for
+    details on these two options.
+    """
+    func = local
+
+    # make sure destination is a file name, not a directory name.
+    destination = normalize_dest(filename, destination, remote=False)
+
+    # grab mode before writing destination, in case filename and destination
+    # are the same.
+    if mirror_local_mode and mode is None:
+        # mode is numeric.  See os.chmod or os.stat.
+        mode = os.stat(src).st_mode
+
+    # Process template
+    text = None
+    if use_jinja:
+        try:
+            from jinja2 import Environment, FileSystemLoader
+            jenv = Environment(loader=FileSystemLoader(template_dir or '.'))
+            text = jenv.get_template(filename).render(**context or {})
+        except ImportError:
+            import traceback
+            tb = traceback.format_exc()
+            abort(tb + "\nUnable to import Jinja2 -- see above.")
+    else:
+        with open(filename) as inputfile:
+            text = inputfile.read()
+        if context:
+            text = text % context
+
+    if backup:
+        backup_file(destination, remote=False)
+
+    # write the processed text
+    with open(destination, 'w') as fh:
+        fh.write(text)
+
+    if mode:
+        set_mode(destination, mode, remote=False)
 
 
 def fix_shebang(shebang, handle):
