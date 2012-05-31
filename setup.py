@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name = 'diabric',
-    version = '0.1.1',
+    version = '0.1.2',
     license = 'MIT',
     description = 'Diabolically atomic Python Fabric fabfile tasks and utilities.',
     long_description = open(os.path.join(os.path.dirname(__file__), 'README.md')).read(),
