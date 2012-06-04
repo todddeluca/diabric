@@ -18,6 +18,150 @@ from fabric.contrib.files import exists, upload_template
 from fabric.contrib.project import rsync_project
 
 
+####################
+# VAGRANT FUNCTIIONS
+
+
+class Vagrant(object):
+    '''
+    Object for launching and terminating vagrant virtual machines,
+    and for configuring fabric to SSH into a VM.
+    '''
+
+    # statuses
+    RUNNING = 'running' # vagrant up
+    NOT_CREATED = 'not created' # vagrant destroy
+    POWEROFF = 'poweroff' # vagrant halt
+
+    def __init__(self, root='.'):
+        '''
+        root: a directory containing a Vagrantfile.  Defaults to '.'.
+        '''
+        self.root = root
+
+    def up(self):
+        '''
+        Launch the Vagrant box.
+        '''
+        with lcd(self.root):
+            local('vagrant up')
+
+    def destroy(self):
+        '''
+        Terminate the running Vagrant box.
+        '''
+        with lcd(self.root):
+            local('vagrant destroy -f')
+
+    def status(self):
+        '''
+        Returns the status of the Vagrant box:
+            'not created' if the box is destroyed
+            'running' if the box is up
+            'poweroff' if the box is halted
+            None if no status is found
+        There might be other statuses, but the Vagrant docs were unclear.
+        '''
+        with lcd(self.root):
+            out = local('vagrant status', capture=True)
+
+        # example out
+        '''
+        Current VM states:
+
+        default                  poweroff
+
+        The VM is powered off. To restart the VM, simply run `vagrant up`
+        '''
+        status = None
+        for line in out.splitlines():
+            if line.startswith('default'):
+                status = line.strip().split(None, 1)[1]
+
+        return status
+
+    def conf_ssh(self, append=True):
+        '''
+        Configure Fabric env for sshing to the Vagrant box.  This changes
+        fabric.api.env to use the right user, host, port, and identity file
+        to ssh into the Vagrant vm.
+
+        append: if True, the vagrant host and key_filename will be appended
+        to env.hosts and env.key_filename.  If False, env.hosts and
+        env.key_filename will only contain the vagrant values.
+        '''
+
+
+        # capture ssh configuration from vagrant
+        with lcd(self.root):
+            out = local('vagrant ssh-config', capture=True)
+            # Example output.  This is a the contents of a SSH config file.
+            '''
+            Host default
+                HostName 127.0.0.1
+                User vagrant
+                Port 2222
+                UserKnownHostsFile /dev/null
+                StrictHostKeyChecking no
+                PasswordAuthentication no
+                IdentityFile /Users/td23/.vagrant.d/insecure_private_key
+                IdentitiesOnly yes
+            '''
+
+        print out
+        # parse vagrant ssh config.
+        conf = dict(line.strip().split(None, 1) for line in out.splitlines())
+        print conf
+
+        # translate ssh config into Fabric env variables.
+        # if (conf.get('StrictHostKeyChecking') == 'no' and
+        #     conf.get('UserKnownHostsFile') == '/dev/null'):
+        #     env.disable_known_hosts = True
+
+        # if conf.get('IdentitiesOnly') == 'yes':
+        #     env.no_agent = True 
+        #     env.no_keys = True
+
+        # env.key_filename can be None, a string or a list of strings.
+        key_filename = conf['IdentityFile']
+        if not append or not env.key_filename:
+            # replace
+            env.key_filename = key_filename
+        elif (isinstance(env.key_filename, basestring) and
+              env.key_filename != key_filename):
+            # turn string into list
+            env.key_filename = [env.key_filename, key_filename]
+        elif key_filename not in env.key_filename:
+            # append the new key_filename
+            env.key_filename.append(key_filename)
+
+        # e.g. vagrant@127.0.0.1:2222
+        host_string = (conf['User'] + '@' + conf['HostName'] + ':' +
+                       conf['Port'])
+        if not append or not env.hosts:
+            env.hosts = [host_string]
+        elif host_string not in env.hosts:
+            env.hosts.append(host_string)
+
+        # if conf.get('HostName'):
+        #     if append:
+        #         env.hosts.append(conf['HostName'])
+        #     else:
+        #         env.hosts = [conf['HostName']]
+
+        # if conf.get('User'):
+        #     env.user = conf['User']
+
+        # if conf.get('Port'):
+        #     env.port = conf['Port']
+
+        # print env.disable_known_hosts
+        # print env.key_filename
+        # print env.no_agent
+        # print env.no_keys
+
+
+
 ###############
 # EC2 FUNCTIONS
 
@@ -27,9 +171,10 @@ def print_instances(instances, prefix=''):
 
 
 def print_instance(instance, prefix=''):
-    print '{}Instance id={}, state={}, tags={}, public_dns_name={}'.format(
+    print ('{}Instance id={}, state={}, tags={}, public_dns_name={}' +
+           ' launch_time={}').format(
         prefix, instance.id, instance.state, instance.tags,
-        instance.public_dns_name)
+        instance.public_dns_name, instance.launch_time)
 
 
 def terminate_instances(conn, instances):
