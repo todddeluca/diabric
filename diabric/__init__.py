@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 
+import boto
 import fabric.api
 import fabric.contrib.files
 import fabric.operations
@@ -18,199 +19,24 @@ from fabric.contrib.files import exists, upload_template
 from fabric.contrib.project import rsync_project
 
 
-####################
-# VAGRANT FUNCTIIONS
-
-
-class Vagrant(object):
+def add_keyfile(keyfile):
     '''
-    Object for launching and terminating vagrant virtual machines,
-    and for configuring fabric to SSH into a VM.
+    Add a keyfile to fabric.api.env.key_filename.  This helper function handles
+    the cases where env.key_filename is None, a string (path to keyfile) or a
+    list of strings.
+
+    keyfile: a path to a key file used by fabric for ssh.
     '''
-
-    # statuses
-    RUNNING = 'running' # vagrant up
-    NOT_CREATED = 'not created' # vagrant destroy
-    POWEROFF = 'poweroff' # vagrant halt
-
-    def __init__(self, root='.'):
-        '''
-        root: a directory containing a Vagrantfile.  Defaults to '.'.
-        '''
-        self.root = root
-
-    def up(self):
-        '''
-        Launch the Vagrant box.
-        '''
-        with lcd(self.root):
-            local('vagrant up')
-
-    def destroy(self):
-        '''
-        Terminate the running Vagrant box.
-        '''
-        with lcd(self.root):
-            local('vagrant destroy -f')
-
-    def status(self):
-        '''
-        Returns the status of the Vagrant box:
-            'not created' if the box is destroyed
-            'running' if the box is up
-            'poweroff' if the box is halted
-            None if no status is found
-        There might be other statuses, but the Vagrant docs were unclear.
-        '''
-        with lcd(self.root):
-            out = local('vagrant status', capture=True)
-
-        # example out
-        '''
-        Current VM states:
-
-        default                  poweroff
-
-        The VM is powered off. To restart the VM, simply run `vagrant up`
-        '''
-        status = None
-        for line in out.splitlines():
-            if line.startswith('default'):
-                status = line.strip().split(None, 1)[1]
-
-        return status
-
-    def conf_ssh(self, append=True):
-        '''
-        Configure Fabric env for sshing to the Vagrant box.  This changes
-        fabric.api.env to use the right user, host, port, and identity file
-        to ssh into the Vagrant vm.
-
-        append: if True, the vagrant host and key_filename will be appended
-        to env.hosts and env.key_filename.  If False, env.hosts and
-        env.key_filename will only contain the vagrant values.
-        '''
-
-
-        # capture ssh configuration from vagrant
-        with lcd(self.root):
-            out = local('vagrant ssh-config', capture=True)
-            # Example output.  This is a the contents of a SSH config file.
-            '''
-            Host default
-                HostName 127.0.0.1
-                User vagrant
-                Port 2222
-                UserKnownHostsFile /dev/null
-                StrictHostKeyChecking no
-                PasswordAuthentication no
-                IdentityFile /Users/td23/.vagrant.d/insecure_private_key
-                IdentitiesOnly yes
-            '''
-
-        print out
-        # parse vagrant ssh config.
-        conf = dict(line.strip().split(None, 1) for line in out.splitlines())
-        print conf
-
-        # translate ssh config into Fabric env variables.
-        # if (conf.get('StrictHostKeyChecking') == 'no' and
-        #     conf.get('UserKnownHostsFile') == '/dev/null'):
-        #     env.disable_known_hosts = True
-
-        # if conf.get('IdentitiesOnly') == 'yes':
-        #     env.no_agent = True 
-        #     env.no_keys = True
-
-        # env.key_filename can be None, a string or a list of strings.
-        key_filename = conf['IdentityFile']
-        if not append or not env.key_filename:
-            # replace
-            env.key_filename = key_filename
-        elif (isinstance(env.key_filename, basestring) and
-              env.key_filename != key_filename):
-            # turn string into list
-            env.key_filename = [env.key_filename, key_filename]
-        elif key_filename not in env.key_filename:
-            # append the new key_filename
-            env.key_filename.append(key_filename)
-
-        # e.g. vagrant@127.0.0.1:2222
-        host_string = (conf['User'] + '@' + conf['HostName'] + ':' +
-                       conf['Port'])
-        if not append or not env.hosts:
-            env.hosts = [host_string]
-        elif host_string not in env.hosts:
-            env.hosts.append(host_string)
-
-        # if conf.get('HostName'):
-        #     if append:
-        #         env.hosts.append(conf['HostName'])
-        #     else:
-        #         env.hosts = [conf['HostName']]
-
-        # if conf.get('User'):
-        #     env.user = conf['User']
-
-        # if conf.get('Port'):
-        #     env.port = conf['Port']
-
-        # print env.disable_known_hosts
-        # print env.key_filename
-        # print env.no_agent
-        # print env.no_keys
-
-
-
-###############
-# EC2 FUNCTIONS
-
-def print_instances(instances, prefix=''):
-    for instance in instances:
-        print_instance(instance, prefix=prefix)
-
-
-def print_instance(instance, prefix=''):
-    print ('{}Instance id={}, state={}, tags={}, public_dns_name={}' +
-           ' launch_time={}').format(
-        prefix, instance.id, instance.state, instance.tags,
-        instance.public_dns_name, instance.launch_time)
-
-
-def terminate_instances(conn, instances):
-    if not instances:
-        return
-    killed_instances = conn.terminate_instances([i.id for i in instances])
-    if len(killed_instances) != len(instances):
-        raise Exception('Not all instances terminated.', instances, 
-                        killed_instances)
-    print 'Terminated instances:'
-    print_instances(killed_instances, '\t')
-
-
-def get_tagged_instances(conn, key, value):
-    '''
-    conn: a boto.ec2.connection.EC2Connection
-    key: a string representing the tag key.
-    value: a string representing the tag value.
-    Return a list of boto.ec2.instance.Instance objects where value of the
-    tag named `tag` matches `value`.
-
-    name: string. The unique value of the 'Name' tag of a (running) instance
-    return: the instance of the current webserver, of None if there is none.
-    raise: Exception if there is more than one non-terminated instance.
-    '''
-    rs = conn.get_all_instances(filters={'tag:{}'.format(key): value})
-    return [i for r in rs for i in r.instances]
-
-
-def on_instances(instances):
-    '''
-    Filter out instances that are 'terminated' or 'shutting-down'.
-    Return a list of the remaining instances.
-    '''
-    bad_states = ['terminated', 'shutting-down']
-    return [i for i in instances if i.state not in bad_states]
+    # env.key_filename can be None, a string or a list of strings.
+    if not env.key_filename:
+        env.key_filename = keyfile
+    elif (isinstance(env.key_filename, basestring) and
+            env.key_filename != keyfile):
+        # turn string into list
+        env.key_filename = [env.key_filename, keyfile]
+    elif keyfile not in env.key_filename:
+        # append the new keyfile
+        env.key_filename.append(keyfile)
 
 
 #########
@@ -418,5 +244,41 @@ class Nginx(object):
         changes take effect.
         '''
         sudo('service nginx reload')
+
+
+##############
+# UNUSED TASKS
+
+@task
+def install_mysql():
+    # install mysql
+    sudo('yum -y install mysql')
+    sudo('yum -y install mysql-server')
+    sudo('yum -y install mysql-devel')
+
+
+@task
+def install_apache():
+    # install apache
+    sudo('yum -y install httpd')
+    sudo('yum -y install httpd-devel')
+
+
+@task
+def install_monit():
+    # install monit to monitor apache
+    sudo('yum -y install monit')
+    sudo('initctl start monit')
+
+
+@task
+def install_others():
+    # install monit to monitor apache
+    # sudo('yum -y install monit')
+
+    # install cpu monitoring tool
+    # http://www.cyberciti.biz/tips/how-do-i-find-out-linux-cpu-utilization.html
+    sudo('yum -y install sysstat')
+
 
 
