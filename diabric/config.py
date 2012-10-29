@@ -117,7 +117,7 @@ class ContextConfig(collections.defaultdict):
 class NamespaceContextConfig(collections.defaultdict):
     '''
     NamespaceContextConfig is a defaultdict of Namespace objects used to store
-    configuration for contexts.  It is also a callable taht returns the
+    configuration for contexts.  It is also a callable that returns the
     Namespace object for the current context.  Namespace objects allow
     attribute-style access, which has a lighter syntax than dict-style access.
 
