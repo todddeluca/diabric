@@ -15,6 +15,7 @@ import os
 
 from fabric.api import run, put, get
 from fabric.contrib.files import exists
+from fabric.tasks import Task
 
 
 def bin(venv):
@@ -100,6 +101,42 @@ def freeze(venv, requirements):
     remote_path = os.path.join(venv, 'requirements.txt')
     run('{} freeze > {}'.format(pip(venv), remote_path))
     get(remote_path, requirements)
+
+
+
+class CreateVenv(Task):
+    def __init__(self, venv, python):
+        self.venv = venv
+        self.python = python
+
+    def run(self, *args, **kwargs):
+        create(self.venv, python=self.python)
+
+
+class InstallVenv(Task):
+    def __init__(self, venv, requirements):
+        self.venv = venv
+        self.requirements = requirements
+
+    def run(self, *args, **kwargs):
+        install(self.venv, self.requirements)
+
+
+class RemoveVenv(Task):
+    def __init__(self, venv):
+        self.venv = venv
+
+    def run(self, *args, **kwargs):
+        remove(self.venv)
+
+
+class FreezeVenv(Task):
+    def __init__(self, venv, requirements):
+        self.venv = venv
+        self.requirements = requirements
+
+    def run(self, *args, **kwargs):
+        freeze(self.venv, self.requirements)
 
 
 
