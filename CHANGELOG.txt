@@ -1,0 +1,7 @@
+
+
+2012/11/23
+
+Remove diabric.pyapp module.  This does nothing other than imposing a directory
+structure that in practice I rarely adhered to.
+
