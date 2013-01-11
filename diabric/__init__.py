@@ -39,6 +39,42 @@ def add_keyfile(keyfile):
         env.key_filename.append(keyfile)
 
 
+def fix_group_perms(path, group=None, remote=True):
+    '''
+    Normalize the permissions of all files and directories within (and
+    including) 'path'.  Specifically it:
+
+    - adds group write permissions to every file and dir that has user write permissions
+    - sets the setgid bit on every dir
+    - changes the group owner of every file and dir to `group` if `group` is not None
+
+    This is useful in a multi-user environment to avoid situations where one
+    user can not change or remove files because another user owns them and the
+    permissions are wrong, even though both users belong to the same group
+    and are working on a shared project.
+
+    Warning: adding group write permissions to ssh keys or a .ssh dir can cause
+    ssh to complain and fail, since these keys are meant to be user specific.
+
+    path: A directory.  The permissions of this directory and all dirs and 
+    files within it will be normalized.
+    group: the name or gid which should own each file and dir in path
+    (including path.)
+    remote: if True, path is assumed to be on a remote host.  Otherwise, path
+    is assumed to be on localhost.
+    '''
+    doit = run if remote else local
+
+    if group:
+        # all dirs and files should be owned by group 'genehawk'
+        doit(r'find {path} -type d -not -group {group} -ls -exec chgrp {group} {{}} \;'.format(path=path, group=group))
+    # all dirs should have setgid perms
+    doit(r'find {path} -type d -not -perm -g+s -ls -exec chmod g+s {{}} \;'.format(path=path))
+    # all dirs and files should have group write perms if the user has write perms
+    doit(r'find {path} -perm -u+w -not -perm -g+w -ls -exec chmod g+w {{}} \;'.format(path=path))
+
+
+
 #########
 # UPSTART
 # event-based init daemon
