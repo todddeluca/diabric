@@ -80,7 +80,7 @@ def create(venv, python='python', virtualenv_script=None):
     run('{} {} --distribute {}'.format(python, script_path, venv))
 
 
-def install(venv, requirements):
+def install(venv, requirements, upgrade=False):
     '''
     venv: virtual environment directory to create.
     requirements: local path of requirements.txt file to be copied to venv dir
@@ -89,7 +89,9 @@ def install(venv, requirements):
     '''
     remote_path = os.path.join(venv, 'requirements.txt')
     put(requirements, remote_path)
-    run('{} install -r {}'.format(pip(venv), remote_path))
+    upgrade_opt = '--upgrade' if upgrade else ''
+    run('{pip} install {upgrade_opt} -r {requirements}'.format(
+        pip=pip(venv), upgrade_opt=upgrade_opt, requirements=remote_path))
 
 
 
@@ -114,12 +116,13 @@ class CreateVenv(Task):
 
 
 class InstallVenv(Task):
-    def __init__(self, venv, requirements):
+    def __init__(self, venv, requirements, upgrade=False):
         self.venv = venv
         self.requirements = requirements
+        self.upgrade = upgrade
 
     def run(self, *args, **kwargs):
-        install(self.venv, self.requirements)
+        install(self.venv, self.requirements, self.upgrade)
 
 
 class RemoveVenv(Task):
